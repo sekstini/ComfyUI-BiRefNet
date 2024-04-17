@@ -133,18 +133,17 @@ class WindowAttention(nn.Module):
         q = q * self.scale
 
         if config.SDPA_enabled:
-            # Assuming mask is given in the same window division format as the inputs
             if mask is not None:
-                # Reshape the mask to match the attention mechanism's expected input dimensions
-                # Expand the mask for each head and batch
-                expanded_mask = mask.unsqueeze(1).expand(B_, self.num_heads, N, N)
-            else:
-                expanded_mask = None
+                # Ensure mask is properly formatted for attention
+                mask = mask.to(dtype=q.dtype)  # Convert mask to the same dtype as q
+                mask = mask.unsqueeze(1)  # Add head dimension
     
-            x = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask=expanded_mask, dropout_p=self.attn_drop_prob, is_causal=False
-            ).transpose(1, 2).reshape(B_, N, C)
+            attn_output, attn_weights = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=mask, dropout_p=self.attn_drop_prob, training=self.training)
+            print(q.shape, k.shape, v.shape, mask, self.attn_drop_prob, self.training)
+            attn_output = attn_output.transpose(1, 2).reshape(B_, N, C)
+            print(attn_output.shape)
+            x = attn_output
         else:
             attn = (q @ k.transpose(-2, -1))
 
