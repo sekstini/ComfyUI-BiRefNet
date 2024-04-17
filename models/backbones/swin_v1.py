@@ -137,10 +137,13 @@ class WindowAttention(nn.Module):
         attn_bias = relative_position_bias.unsqueeze(0)
 
         if config.SDPA_enabled:
-            print(mask.shape if mask is not None else mask)
-            print(attn_bias.shape)
+            if mask is not None:
+                attn_mask = attn_bias
+                attn_mask += mask.unsqueeze(1).expand(B_, self.num_heads, N, N)
+            else:
+                attn_mask = attn_bias
             attn_output = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_bias, dropout_p=self.attn_drop_prob, is_causal=False)
+                q, k, v, attn_mask=attn_mask, dropout_p=self.attn_drop_prob, is_causal=False)
             attn_output = attn_output.transpose(1, 2).reshape(B_, N, C)
             x = attn_output
         else:
