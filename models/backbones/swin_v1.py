@@ -139,8 +139,8 @@ class WindowAttention(nn.Module):
                 mask = mask.unsqueeze(1)  # Add head dimension
     
             attn_output, attn_weights = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=mask, dropout_p=self.attn_drop_prob, training=self.training)
-            print(q.shape, k.shape, v.shape, mask, self.attn_drop_prob, self.training)
+                q, k, v, attn_mask=mask, dropout_p=self.attn_drop_prob, is_causal=False)
+            print(q.shape, k.shape, v.shape, mask, self.attn_drop_prob)
             attn_output = attn_output.transpose(1, 2).reshape(B_, N, C)
             print(attn_output.shape)
             x = attn_output
