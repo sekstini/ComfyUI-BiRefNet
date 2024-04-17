@@ -139,7 +139,7 @@ class WindowAttention(nn.Module):
         if config.SDPA_enabled:
             if mask is not None:
                 attn_mask = attn_bias
-                attn_mask += mask.unsqueeze(1).expand(B_, self.num_heads, N, N)
+                attn_mask = attn_mask + mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
             else:
                 attn_mask = attn_bias
             attn_output = torch.nn.functional.scaled_dot_product_attention(
