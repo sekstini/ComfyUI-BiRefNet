@@ -131,26 +131,20 @@ class WindowAttention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
         q = q * self.scale
+        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
+            self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        attn_bias = relative_position_bias.unsqueeze(0)
 
         if config.SDPA_enabled:
-            if mask is not None:
-                # Ensure mask is properly formatted for attention
-                mask = mask.to(dtype=q.dtype)  # Convert mask to the same dtype as q
-                mask = mask.unsqueeze(1)  # Add head dimension
-    
+            print(mask.shape if mask is not None else mask)
             attn_output, attn_weights = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=mask, dropout_p=self.attn_drop_prob, is_causal=False)
-            print(q.shape, k.shape, v.shape, mask, self.attn_drop_prob)
+                q, k, v, attn_mask=attn_bias, dropout_p=self.attn_drop_prob, is_causal=False)
             attn_output = attn_output.transpose(1, 2).reshape(B_, N, C)
-            print(attn_output.shape)
             x = attn_output
         else:
             attn = (q @ k.transpose(-2, -1))
-
-            relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
-                self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
-            relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
-            attn = attn + relative_position_bias.unsqueeze(0)
+            attn = attn + attn_bias
 
             if mask is not None:
                 nW = mask.shape[0]
