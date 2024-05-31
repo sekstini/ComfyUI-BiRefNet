@@ -31,39 +31,41 @@ def load_model(ckpt: str = "BiRefNet-DIS_ep580.pth"):
     state_dict = {k.removeprefix("_orig_mod."): v for k, v in state_dict.items()}
 
     model.load_state_dict(state_dict)
-    return model.to("cuda", torch.float16).eval().requires_grad_(False)
+    return model.to("cuda", torch.float32).eval().requires_grad_(False)
 
 model = load_model()
 image_processor = BiRefNetImageProcessor(model.config.size)
 
 img = Image.open("green_knight.jpeg")
-pixel_values = image_processor(img).to("cuda", torch.float16).unsqueeze(0)
+pixel_values = image_processor(img).to("cuda", torch.float32).unsqueeze(0)
 
-"""
+
 optimized_model = torch_tensorrt.compile(
     model,
     ir="torch_compile",
-    #inputs=[torch_tensorrt.Input(
-    #    min_shape=(1, 3, 512, 512),
-    #    opt_shape=(1, 3, 1024, 1024),
-    #    max_shape=(1, 3, 1024, 1024),
-    #    dtype=torch.float16,
-    #    tensor_domain=(-1.0, 1.0),
-    #)],
-    inputs=[pixel_values],
-    enabled_precisions={torch.float16},
+    inputs=[torch_tensorrt.Input(
+        #min_shape=(1, 3, 512, 512),
+        #opt_shape=(1, 3, 1024, 1024),
+        #max_shape=(1, 3, 1024, 1024),
+        [1, 3, 1024, 1024],
+        dtype=torch.float16,
+        tensor_domain=(-1.0, 1.0),
+    )],
+    # inputs=[pixel_values],
+    enabled_precisions={torch.float16, torch.float32},
     debug=True,
     workspace_size=20 << 30,
-    min_block_size=1024,
-    optimization_level=4,
-    enable_experimental_decompositions=False,
+    min_block_size=1,
+    optimization_level=3,
+    # enable_experimental_decompositions=False,
 )
 print("Optimized model compiled")
-"""
+
 
 @torch.no_grad()
 def infer(pixel_values: torch.Tensor) -> torch.Tensor:
-    return model(pixel_values)
+    with torch.autocast("cuda", torch.float16, enabled=True):
+        return optimized_model(pixel_values)
 
 git_commit = os.popen("git rev-parse HEAD").read().strip()
 benchmark_dir = Path(f"benchmarks/{git_commit}")
@@ -90,11 +92,13 @@ if True:
 infer(pixel_values)
 
 print("Benchmarking inference...")
-measurement = Timer(
-    stmt="infer(pixel_values)",
-    globals={"infer": infer, "pixel_values": pixel_values},
-    label="BiRefNet",
-).blocked_autorange(min_run_time=2)
+for _ in range(2):
+    measurement = Timer(
+        stmt="infer(pixel_values)",
+        globals={"infer": infer, "pixel_values": pixel_values},
+        label="BiRefNet",
+    ).blocked_autorange(min_run_time=2)
+    print(measurement)
 print(measurement, file=(benchmark_dir / "benchmark.txt").open("w"))
 
 
