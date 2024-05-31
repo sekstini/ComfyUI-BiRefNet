@@ -71,7 +71,7 @@ class Config():
         self.lr_decay_epochs = [1e4]    # Set to negative N to decay the lr in the last N-th epoch.
         self.lr_decay_rate = 0.5
         self.only_S_MAE = False
-        self.SDPA_enabled = False    # Bug. Slower and errors occur in multi-GPUs
+        self.SDPA_enabled = True    # Bug. Slower and errors occur in multi-GPUs
 
         # Data
         self.data_root_dir = os.path.join(self.sys_home_dir, 'datasets/dis')

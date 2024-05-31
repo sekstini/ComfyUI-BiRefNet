@@ -20,6 +20,8 @@ def build_backbone(bb_name, pretrained=True, params_settings=''):
         bb_net = list(resnet50(pretrained=ResNet50_Weights.DEFAULT if pretrained else None).children())
         bb = nn.Sequential(OrderedDict({'conv1': nn.Sequential(*bb_net[0:3]), 'conv2': bb_net[4], 'conv3': bb_net[5], 'conv4': bb_net[6]}))
     else:
+        print("build backbone")
+        print('{}({})'.format(bb_name, params_settings))
         bb = eval('{}({})'.format(bb_name, params_settings))
         if pretrained:
             bb = load_weights(bb, bb_name)

@@ -119,6 +119,13 @@ class WindowAttention(nn.Module):
         trunc_normal_(self.relative_position_bias_table, std=.02)
         self.softmax = nn.Softmax(dim=-1)
 
+    def _get_rel_pos_bias(self) -> torch.Tensor:
+        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)]
+        relative_position_bias = relative_position_bias.view(self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        return relative_position_bias.unsqueeze(0)
+
+
     def forward(self, x, mask=None):
         """ Forward function.
 
@@ -130,37 +137,18 @@ class WindowAttention(nn.Module):
         qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
-        q = q * self.scale
-        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
-            self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
-        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
-        attn_bias = relative_position_bias.unsqueeze(0)
+        attn_bias = self._get_rel_pos_bias()
 
-        if config.SDPA_enabled:
-            if mask is not None:
-                attn_mask = attn_bias
-                attn_mask = attn_mask + mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
-            else:
-                attn_mask = attn_bias
-            attn_output = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=attn_mask, dropout_p=self.attn_drop_prob, is_causal=False)
-            attn_output = attn_output.transpose(1, 2).reshape(B_, N, C)
-            x = attn_output
+        if mask is not None:
+            attn_mask = attn_bias
+            attn_mask = attn_mask + mask.unsqueeze(1).expand(-1, self.num_heads, -1, -1)
         else:
-            attn = (q @ k.transpose(-2, -1))
-            attn = attn + attn_bias
+            attn_mask = attn_bias
 
-            if mask is not None:
-                nW = mask.shape[0]
-                attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
-                attn = attn.view(-1, self.num_heads, N, N)
-                attn = self.softmax(attn)
-            else:
-                attn = self.softmax(attn)
+        attn_output = F.scaled_dot_product_attention(q, k, v, scale=self.scale, attn_mask=attn_mask, dropout_p=self.attn_drop_prob, is_causal=False)
+        attn_output = attn_output.transpose(1, 2).reshape(B_, N, C)
+        x = attn_output
 
-            attn = self.attn_drop(attn)
-
-            x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -241,6 +229,7 @@ class SwinTransformerBlock(nn.Module):
         x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # nW*B, window_size*window_size, C
 
         # W-MSA/SW-MSA
+        # print(x_windows.shape, attn_mask.shape if attn_mask is not None else None)
         attn_windows = self.attn(x_windows, mask=attn_mask)  # nW*B, window_size*window_size, C
 
         # merge windows
@@ -399,7 +388,7 @@ class BasicLayer(nn.Module):
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
         attn_mask = attn_mask.masked_fill(attn_mask != 0.0, -100.0)
 
-        for blk in self.blocks:
+        for i, blk in enumerate(self.blocks):
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(blk, x, attn_mask, H, W)
             else:
