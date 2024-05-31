@@ -35,7 +35,7 @@ image_processor = BiRefNetImageProcessor(model.config.size)
 
 @torch.inference_mode()
 def infer(pixel_values: torch.Tensor) -> torch.Tensor:
-    with torch.autocast("cuda", torch.float16, enabled=True):
+    with torch.autocast("cuda", torch.float16, enabled=False):
         return model(pixel_values)
 
 
