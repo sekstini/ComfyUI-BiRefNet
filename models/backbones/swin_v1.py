@@ -4,12 +4,12 @@
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Ze Liu, Yutong Lin, Yixuan Wei
 # --------------------------------------------------------
+import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
-import numpy as np
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
 from config import Config
@@ -205,10 +205,8 @@ class SwinTransformerBlock(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-        self.H = None
-        self.W = None
 
-    def forward(self, x, mask_matrix):
+    def forward(self, x, mask_matrix, H, W):
         """ Forward function.
 
         Args:
@@ -217,7 +215,6 @@ class SwinTransformerBlock(nn.Module):
             mask_matrix: Attention mask for cyclic shift.
         """
         B, L, C = x.shape
-        H, W = self.H, self.W
         assert L == H * W, "input feature has wrong size"
 
         shortcut = x
@@ -311,6 +308,7 @@ class PatchMerging(nn.Module):
         return x
 
 
+
 class BasicLayer(nn.Module):
     """ A basic Swin Transformer layer for one stage.
 
@@ -381,9 +379,9 @@ class BasicLayer(nn.Module):
         """
 
         # calculate attention mask for SW-MSA
-        Hp = int(np.ceil(H / self.window_size)) * self.window_size
-        Wp = int(np.ceil(W / self.window_size)) * self.window_size
-        img_mask = torch.zeros((1, Hp, Wp, 1), device=x.device)  # 1 Hp Wp 1
+        Hp = int(math.ceil(H / self.window_size)) * self.window_size
+        Wp = int(math.ceil(W / self.window_size)) * self.window_size
+        img_mask = torch.zeros((1, Hp, Wp, 1), dtype=x.dtype, device=x.device)  # 1 Hp Wp 1
         h_slices = (slice(0, -self.window_size),
                     slice(-self.window_size, -self.shift_size),
                     slice(-self.shift_size, None))
@@ -393,20 +391,19 @@ class BasicLayer(nn.Module):
         cnt = 0
         for h in h_slices:
             for w in w_slices:
-                img_mask[:, h, w, :] = cnt
+                img_mask[:, h, w, :] = float(cnt)
                 cnt += 1
 
         mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, 1
         mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
-        attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
+        attn_mask = attn_mask.masked_fill(attn_mask != 0.0, -100.0)
 
         for blk in self.blocks:
-            blk.H, blk.W = H, W
             if self.use_checkpoint:
-                x = checkpoint.checkpoint(blk, x, attn_mask)
+                x = checkpoint.checkpoint(blk, x, attn_mask, H, W)
             else:
-                x = blk(x, attn_mask)
+                x = blk(x, attn_mask, H, W)
         if self.downsample is not None:
             x_down = self.downsample(x, H, W)
             Wh, Ww = (H + 1) // 2, (W + 1) // 2
@@ -534,7 +531,7 @@ class SwinTransformer(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         # stochastic depth
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
+        dpr = torch.linspace(0, drop_path_rate, sum(depths)).tolist()  # stochastic depth decay rule
 
         # build layers
         self.layers = nn.ModuleList()
@@ -559,10 +556,7 @@ class SwinTransformer(nn.Module):
         self.num_features = num_features
 
         # add a norm layer for each output
-        for i_layer in out_indices:
-            layer = norm_layer(num_features[i_layer])
-            layer_name = f'norm{i_layer}'
-            self.add_module(layer_name, layer)
+        self.norms = nn.ModuleList([norm_layer(num_features[i]) for i in out_indices])
 
         self._freeze_stages()
 
@@ -627,9 +621,7 @@ class SwinTransformer(nn.Module):
             x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)
 
             if i in self.out_indices:
-                norm_layer = getattr(self, f'norm{i}')
-                x_out = norm_layer(x_out)
-
+                x_out = self.norms[i](x_out)
                 out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
                 outs.append(out)
 

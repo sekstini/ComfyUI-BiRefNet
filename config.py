@@ -1,7 +1,8 @@
 import os
 import math
-from folder_paths import models_dir
+import huggingface_hub
 
+models_dir = huggingface_hub.snapshot_download("ViperYX/BiRefNet")
 
 class Config():
     def __init__(self) -> None:
@@ -55,7 +56,7 @@ class Config():
             self.lateral_channels_in_collection = [channel * 2 for channel in self.lateral_channels_in_collection]
         self.cxt = self.lateral_channels_in_collection[1:][::-1][-self.cxt_num:] if self.cxt_num else []
         self.sys_home_dir = models_dir
-        self.weights_root_dir = os.path.join(self.sys_home_dir, "BiRefNet")
+        self.weights_root_dir = self.sys_home_dir
         self.weights = {
             'pvt_v2_b2': os.path.join(self.weights_root_dir, 'pvt_v2_b2.pth'),
             'pvt_v2_b5': os.path.join(self.weights_root_dir, ['pvt_v2_b5.pth', 'pvt_v2_b5_22k.pth'][0]),

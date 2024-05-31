@@ -26,6 +26,7 @@ def build_backbone(bb_name, pretrained=True, params_settings=''):
     return bb
 
 def load_weights(model, model_name):
+    print(f"Loading weights for {model_name}...")
     save_model = torch.load(config.weights[model_name], map_location=torch.device('cpu'))
     model_dict = model.state_dict()
     state_dict = {k: v if v.size() == model_dict[k].size() else model_dict[k] for k, v in save_model.items() if k in model_dict.keys()}

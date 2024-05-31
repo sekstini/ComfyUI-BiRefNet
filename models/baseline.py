@@ -77,6 +77,7 @@ class BiRefNet(nn.Module):
             x1 = self.bb.conv1(x); x2 = self.bb.conv2(x1); x3 = self.bb.conv3(x2); x4 = self.bb.conv4(x3)
         else:
             x1, x2, x3, x4 = self.bb(x)
+
             if self.config.mul_scl_ipt == 'cat':
                 B, C, H, W = x.shape
                 x1_, x2_, x3_, x4_ = self.bb(F.interpolate(x, size=(H//2, W//2), mode='bilinear', align_corners=True))
